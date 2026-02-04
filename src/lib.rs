@@ -1,68 +1,165 @@
-//! Logic for discovering and searching projects within the Code Control Plane.
+mod strategies;
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::process::Command;
+use std::time::{Duration, SystemTime};
+pub use strategies::detect_stack;
+use toad_core::{ActivityTier, ProjectDetail, ProjectStack, VcsStatus};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum ProjectStack {
-    Rust,
-    Go,
-    NodeJS,
-    Python,
-    Monorepo,
-    Generic,
-}
-
-impl std::fmt::Display for ProjectStack {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Rust => write!(f, "Rust"),
-            Self::Go => write!(f, "Go"),
-            Self::NodeJS => write!(f, "NodeJS"),
-            Self::Python => write!(f, "Python"),
-            Self::Monorepo => write!(f, "Monorepo"),
-            Self::Generic => write!(f, "Generic"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectDetail {
-    pub name: String,
-    pub path: PathBuf,
-    pub stack: ProjectStack,
-    pub essence: Option<String>,
-    pub tokens: Vec<String>,
+/// Extracts a high-level "Fingerprint" (mtime) of the workspace.
+pub fn get_workspace_fingerprint(root: &Path) -> Result<u64> {
+    let metadata = fs::metadata(root).context("Failed to stat projects root")?;
+    let mtime = metadata
+        .modified()?
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_secs();
+    Ok(mtime)
 }
 
 /// Extracts the "essence" of a project from its README.md.
-/// Grabs the first 2-3 meaningful sentences.
+/// v2: Grabs up to 10 meaningful lines, excluding images, badges, and HTML.
 pub fn extract_essence(project_path: &Path) -> Option<String> {
     let readme_names = ["README.md", "readme.md", "README.markdown"];
     for name in readme_names {
         let path = project_path.join(name);
         if let Ok(content) = fs::read_to_string(&path) {
-            // Filter out headers, empty lines, and grab first ~200 chars or first few sentences
-            let lines: Vec<&str> = content
+            let lines: Vec<String> = content
                 .lines()
                 .map(|l| l.trim())
-                .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                .take(3)
+                .filter(|l| {
+                    !l.is_empty()
+                        && !l.starts_with("#")   // Headers are good but we usually want the text under them
+                        && !l.starts_with("![") // No images
+                        && !l.starts_with("[![") // No badges
+                        && !l.starts_with("<")    // No HTML
+                        && !l.starts_with("[") // No link-only lines
+                })
+                .take(10)
+                .map(|l| l.to_string())
                 .collect();
 
             if !lines.is_empty() {
                 let combined = lines.join(" ");
-                // Limit to 200 chars for the manifest
-                if combined.len() > 200 {
-                    return Some(format!("{}...", &combined[..197]));
+                if combined.len() > 600 {
+                    return Some(format!("{}...", &combined[..597]));
                 }
                 return Some(combined);
             }
         }
     }
     None
+}
+
+/// Determines the activity tier based on the last modification time of the directory.
+pub fn detect_activity(path: &Path) -> ActivityTier {
+    let now = SystemTime::now();
+    let mtime = fs::metadata(path).and_then(|m| m.modified()).unwrap_or(now);
+
+    let age = now.duration_since(mtime).unwrap_or(Duration::from_secs(0));
+    let day = 24 * 60 * 60;
+
+    if age.as_secs() < 7 * day {
+        ActivityTier::Active
+    } else if age.as_secs() < 30 * day {
+        ActivityTier::Cold
+    } else {
+        ActivityTier::Archive
+    }
+}
+
+/// Checks the Git status of the project.
+pub fn detect_vcs_status(path: &Path) -> VcsStatus {
+    if !path.join(".git").exists() {
+        return VcsStatus::None;
+    }
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("status")
+        .arg("--porcelain")
+        .output();
+
+    match output {
+        Ok(out) => {
+            if out.stdout.is_empty() {
+                VcsStatus::Clean
+            } else {
+                VcsStatus::Dirty
+            }
+        }
+        Err(_) => VcsStatus::None,
+    }
+}
+
+/// Generates procedural hashtags based on project files and stack.
+pub fn generate_hashtags(path: &Path, stack: &ProjectStack) -> Vec<String> {
+    let mut tags = Vec::new();
+
+    match stack {
+        ProjectStack::Rust => tags.push("#rust".to_string()),
+        ProjectStack::Go => tags.push("#go".to_string()),
+        ProjectStack::NodeJS => tags.push("#nodejs".to_string()),
+        ProjectStack::Python => tags.push("#python".to_string()),
+        ProjectStack::Monorepo => tags.push("#monorepo".to_string()),
+        ProjectStack::Generic => {}
+    }
+
+    let files = fs::read_dir(path)
+        .ok()
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+
+    if files.contains(&"Wails.json".to_string()) || files.contains(&"wails.json".to_string()) {
+        tags.push("#desktop".to_string());
+        tags.push("#wails".to_string());
+    }
+    if files.contains(&"Dockerfile".to_string()) {
+        tags.push("#docker".to_string());
+    }
+    if files.contains(&"tauri.conf.json".to_string()) {
+        tags.push("#tauri".to_string());
+        tags.push("#desktop".to_string());
+    }
+
+    tags.sort();
+    tags.dedup();
+    tags
+}
+
+/// Attempts to find sub-projects within a monorepo.
+pub fn discover_sub_projects(path: &Path) -> Vec<String> {
+    let mut subs = Vec::new();
+
+    let sub_dirs = ["packages", "apps", "services", "crates"];
+
+    for sub in sub_dirs {
+        let sub_path = path.join(sub);
+
+        if let Ok(entries) = fs::read_dir(sub_path) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str()
+                    && entry.path().is_dir()
+                    && !name.starts_with('.')
+                    && name != "node_modules"
+                    && name != "target"
+                {
+                    subs.push(name.to_string());
+                }
+            }
+        }
+    }
+
+    subs.sort();
+
+    subs
 }
 
 /// Finds projects in the given root directory that match the query string (case-insensitive).
@@ -99,46 +196,6 @@ pub fn find_projects(root: &Path, query: &str, limit: usize) -> Result<Vec<Strin
     Ok(matches)
 }
 
-/// Scans a directory to determine its primary tech stack.
-pub fn detect_stack(path: &Path) -> ProjectStack {
-    let files = fs::read_dir(path)
-        .ok()
-        .map(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .filter_map(|e| e.file_name().into_string().ok())
-                .collect::<Vec<String>>()
-        })
-        .unwrap_or_default();
-
-    // 1. Monorepo Heuristics
-    if files.contains(&"nx.json".to_string())
-        || files.contains(&"turbo.json".to_string())
-        || files.contains(&"go.work".to_string())
-        || files.contains(&"lerna.json".to_string())
-    {
-        return ProjectStack::Monorepo;
-    }
-
-    // 2. Language Specifics
-    if files.contains(&"Cargo.toml".to_string()) {
-        return ProjectStack::Rust;
-    }
-    if files.contains(&"go.mod".to_string()) {
-        return ProjectStack::Go;
-    }
-    if files.contains(&"package.json".to_string()) {
-        return ProjectStack::NodeJS;
-    }
-    if files.contains(&"requirements.txt".to_string())
-        || files.contains(&"pyproject.toml".to_string())
-    {
-        return ProjectStack::Python;
-    }
-
-    ProjectStack::Generic
-}
-
 /// Scans the entire root directory for detailed project metadata.
 pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
     let mut details = Vec::new();
@@ -164,13 +221,24 @@ pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
 
             let stack = detect_stack(&path);
             let essence = extract_essence(&path);
+            let hashtags = generate_hashtags(&path, &stack);
+            let activity = detect_activity(&path);
+            let vcs_status = detect_vcs_status(&path);
+            let sub_projects = if stack == ProjectStack::Monorepo {
+                discover_sub_projects(&path)
+            } else {
+                Vec::new()
+            };
 
             details.push(ProjectDetail {
                 name: name.to_string(),
                 path: path.clone(),
                 stack,
+                activity,
+                vcs_status,
                 essence,
-                tokens: Vec::new(),
+                hashtags,
+                sub_projects,
             });
         }
     }
@@ -180,57 +248,4 @@ pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_find_projects() {
-        let dir = tempdir().unwrap();
-        let root = dir.path();
-
-        fs::create_dir(root.join("Primatif_Core")).unwrap();
-        fs::create_dir(root.join("Primatif_UI")).unwrap();
-        fs::create_dir(root.join("Other_Project")).unwrap();
-        fs::create_dir(root.join(".hidden")).unwrap();
-
-        let results = find_projects(root, "primatif", 10).unwrap();
-        assert_eq!(results, vec!["Primatif_Core", "Primatif_UI"]);
-    }
-
-    #[test]
-    fn test_scan_all_projects() {
-        let dir = tempdir().unwrap();
-        let root = dir.path();
-
-        // Create a Rust project
-        let rust_path = root.join("rust_p");
-        fs::create_dir(&rust_path).unwrap();
-        fs::write(rust_path.join("Cargo.toml"), "").unwrap();
-        fs::write(
-            rust_path.join("README.md"),
-            "# Rust Project\nThis is a rust project.",
-        )
-        .unwrap();
-
-        // Create a Go project
-        let go_path = root.join("go_p");
-        fs::create_dir(&go_path).unwrap();
-        fs::write(go_path.join("go.mod"), "").unwrap();
-
-        let projects = scan_all_projects(root).unwrap();
-        assert_eq!(projects.len(), 2);
-        assert_eq!(projects[0].name, "go_p");
-        assert_eq!(projects[0].stack, ProjectStack::Go);
-        assert_eq!(projects[1].name, "rust_p");
-        assert_eq!(projects[1].stack, ProjectStack::Rust);
-        assert!(projects[1].essence.is_some());
-        assert!(
-            projects[1]
-                .essence
-                .as_ref()
-                .unwrap()
-                .contains("This is a rust project")
-        );
-    }
-}
+mod tests;
