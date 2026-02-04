@@ -5,15 +5,14 @@ use std::fs;
 use std::path::Path;
 
 /// Finds projects in the given root directory that match the query string (case-insensitive).
-/// 
+///
 /// Returns up to `limit` matches, sorted alphabetically.
 /// Hidden directories (starting with `.`) are ignored.
 pub fn find_projects(root: &Path, query: &str, limit: usize) -> Result<Vec<String>> {
     let mut matches = Vec::new();
     let query_lower = query.to_lowercase();
 
-    let entries = fs::read_dir(root)
-        .context(format!("Failed to read directory: {:?}", root))?;
+    let entries = fs::read_dir(root).context(format!("Failed to read directory: {:?}", root))?;
 
     for entry in entries {
         let entry = entry?;
