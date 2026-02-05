@@ -2,7 +2,7 @@ use crate::*;
 use std::fs;
 use std::time::{Duration, SystemTime};
 use tempfile::tempdir;
-use toad_core::{ActivityTier, ProjectStack, VcsStatus};
+use toad_core::{ActivityTier, ProjectStack, VcsStatus, Workspace};
 
 #[test]
 fn test_find_projects() {
@@ -40,10 +40,14 @@ fn test_activity_detection() -> Result<()> {
 #[test]
 fn test_scan_all_projects() {
     let dir = tempdir().unwrap();
-    let root = dir.path();
+    let root = dir.path().to_path_buf();
+    let ws = Workspace::with_root(root.clone());
+
+    // Create projects dir
+    fs::create_dir(root.join("projects")).unwrap();
 
     // Create a Rust project
-    let rust_path = root.join("rust_p");
+    let rust_path = root.join("projects").join("rust_p");
     fs::create_dir(&rust_path).unwrap();
     fs::write(rust_path.join("Cargo.toml"), "").unwrap();
     fs::write(
@@ -52,7 +56,7 @@ fn test_scan_all_projects() {
     )
     .unwrap();
 
-    let projects = scan_all_projects(root).unwrap();
+    let projects = scan_all_projects(&ws).unwrap();
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].name, "rust_p");
     assert_eq!(projects[0].stack, ProjectStack::Rust);
@@ -150,15 +154,17 @@ fn test_discover_sub_projects() -> Result<()> {
 #[test]
 fn test_scan_all_projects_high_volume() -> Result<()> {
     let dir = tempdir()?;
-    let root = dir.path();
+    let root = dir.path().to_path_buf();
+    let ws = Workspace::with_root(root.clone());
+    fs::create_dir(root.join("projects"))?;
 
     for i in 0..50 {
-        let proj_path = root.join(format!("proj-{}", i));
+        let proj_path = root.join("projects").join(format!("proj-{}", i));
         fs::create_dir(&proj_path)?;
         fs::write(proj_path.join("Cargo.toml"), "")?;
     }
 
-    let projects = scan_all_projects(root)?;
+    let projects = scan_all_projects(&ws)?;
     assert_eq!(projects.len(), 50);
     // Should be sorted
     assert_eq!(projects[0].name, "proj-0");

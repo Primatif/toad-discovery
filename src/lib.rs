@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 pub use strategies::detect_stack;
-use toad_core::{ActivityTier, ProjectDetail, ProjectStack, VcsStatus};
+use toad_core::{ActivityTier, ProjectDetail, ProjectStack, TagRegistry, VcsStatus, Workspace};
 
 /// Extracts a high-level "Fingerprint" (mtime) of the workspace.
 pub fn get_workspace_fingerprint(root: &Path) -> Result<u64> {
@@ -185,10 +185,14 @@ pub fn find_projects(root: &Path, query: &str, limit: usize) -> Result<Vec<Strin
 }
 
 /// Scans the entire root directory for detailed project metadata.
-pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
+pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
+    let root = &workspace.projects_dir;
     if !root.exists() {
         return Ok(Vec::new());
     }
+
+    let tags_path = workspace.tags_path();
+    let tag_registry = TagRegistry::load(&tags_path).unwrap_or_default();
 
     let mut details: Vec<ProjectDetail> = fs::read_dir(root)
         .context(format!("Failed to read directory: {:?}", root))?
@@ -216,6 +220,21 @@ pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
                 Vec::new()
             };
 
+            // Merge persistent tags
+            let persistent_tags = tag_registry.get_tags(&name);
+            let mut all_tags = hashtags.clone();
+            for t in persistent_tags {
+                let tag_with_hash = if t.starts_with('#') {
+                    t.clone()
+                } else {
+                    format!("#{}", t)
+                };
+                if !all_tags.contains(&tag_with_hash) {
+                    all_tags.push(tag_with_hash);
+                }
+            }
+            all_tags.sort();
+
             Some(ProjectDetail {
                 name,
                 path,
@@ -224,6 +243,7 @@ pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
                 vcs_status,
                 essence,
                 hashtags,
+                tags: all_tags,
                 sub_projects,
             })
         })
