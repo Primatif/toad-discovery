@@ -95,7 +95,10 @@ fn test_detect_vcs_status() -> Result<()> {
     assert_eq!(detect_vcs_status(p), VcsStatus::None);
 
     // Init repo
-    std::process::Command::new("git").arg("init").current_dir(p).output()?;
+    std::process::Command::new("git")
+        .arg("init")
+        .current_dir(p)
+        .output()?;
     assert_eq!(detect_vcs_status(p), VcsStatus::Clean);
 
     // Dirty

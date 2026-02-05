@@ -12,5 +12,5 @@ toad-core = { version = "0.3.0", path = "../toad-core" }
 toad-git = { path = "../toad-git" }
 
 [dev-dependencies]
-tempfile = "3.24.0"
 filetime = "0.2"
+tempfile = "3.24.0"
