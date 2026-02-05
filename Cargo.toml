@@ -9,6 +9,7 @@ ignore = "0.4.25"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 toad-core = { version = "0.2.0", path = "../toad-core" }
+toad-git = { path = "../toad-git" }
 
 [dev-dependencies]
 tempfile = "3.24.0"

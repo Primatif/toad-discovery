@@ -3,7 +3,6 @@ mod strategies;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 use std::time::{Duration, SystemTime};
 pub use strategies::detect_stack;
 use toad_core::{ActivityTier, ProjectDetail, ProjectStack, VcsStatus};
@@ -71,25 +70,13 @@ pub fn detect_activity(path: &Path) -> ActivityTier {
 
 /// Checks the Git status of the project.
 pub fn detect_vcs_status(path: &Path) -> VcsStatus {
-    if !path.join(".git").exists() {
-        return VcsStatus::None;
-    }
-
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .arg("status")
-        .arg("--porcelain")
-        .output();
-
-    match output {
-        Ok(out) => {
-            if out.stdout.is_empty() {
-                VcsStatus::Clean
-            } else {
-                VcsStatus::Dirty
-            }
-        }
+    match toad_git::status::check_status(path) {
+        Ok(status) => match status {
+            toad_git::status::GitStatus::Clean => VcsStatus::Clean,
+            toad_git::status::GitStatus::Dirty => VcsStatus::Dirty,
+            toad_git::status::GitStatus::Untracked => VcsStatus::Untracked,
+            toad_git::status::GitStatus::NoRepo => VcsStatus::None,
+        },
         Err(_) => VcsStatus::None,
     }
 }
