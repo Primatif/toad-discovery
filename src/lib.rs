@@ -190,23 +190,20 @@ pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
         return Ok(Vec::new());
     }
 
-    let entries: Vec<_> = fs::read_dir(root)
+    let mut details: Vec<ProjectDetail> = fs::read_dir(root)
         .context(format!("Failed to read directory: {:?}", root))?
-        .flatten()
-        .filter(|e| {
-            e.path().is_dir()
-                && e.file_name()
-                    .to_str()
-                    .map(|s| !s.starts_with('.'))
-                    .unwrap_or(false)
-        })
-        .collect();
-
-    let mut details: Vec<ProjectDetail> = entries
-        .into_par_iter()
-        .map(|entry| {
+        .par_bridge()
+        .filter_map(|entry_res| {
+            let entry = entry_res.ok()?;
             let path = entry.path();
+            if !path.is_dir() {
+                return None;
+            }
+
             let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                return None;
+            }
 
             let stack = detect_stack(&path);
             let essence = extract_essence(&path);
@@ -219,7 +216,7 @@ pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
                 Vec::new()
             };
 
-            ProjectDetail {
+            Some(ProjectDetail {
                 name,
                 path,
                 stack,
@@ -228,7 +225,7 @@ pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
                 essence,
                 hashtags,
                 sub_projects,
-            }
+            })
         })
         .collect();
 
