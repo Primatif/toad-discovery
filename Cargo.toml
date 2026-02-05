@@ -1,6 +1,6 @@
 [package]
 name = "discovery"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 [dependencies]
@@ -8,7 +8,7 @@ anyhow = "1.0.100"
 ignore = "0.4.25"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-toad-core = { version = "0.2.0", path = "../toad-core" }
+toad-core = { version = "0.3.0", path = "../toad-core" }
 toad-git = { path = "../toad-git" }
 
 [dev-dependencies]
