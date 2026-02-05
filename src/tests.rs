@@ -146,3 +146,22 @@ fn test_discover_sub_projects() -> Result<()> {
     assert_eq!(subs, vec!["sub-a", "sub-b"]);
     Ok(())
 }
+
+#[test]
+fn test_scan_all_projects_high_volume() -> Result<()> {
+    let dir = tempdir()?;
+    let root = dir.path();
+
+    for i in 0..50 {
+        let proj_path = root.join(format!("proj-{}", i));
+        fs::create_dir(&proj_path)?;
+        fs::write(proj_path.join("Cargo.toml"), "")?;
+    }
+
+    let projects = scan_all_projects(root)?;
+    assert_eq!(projects.len(), 50);
+    // Should be sorted
+    assert_eq!(projects[0].name, "proj-0");
+    assert_eq!(projects[49].name, "proj-9"); // alphabetical: 0, 1, 10... 49, 5, 6, 7, 8, 9
+    Ok(())
+}

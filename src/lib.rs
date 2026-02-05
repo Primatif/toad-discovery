@@ -1,6 +1,7 @@
 mod strategies;
 
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -185,26 +186,27 @@ pub fn find_projects(root: &Path, query: &str, limit: usize) -> Result<Vec<Strin
 
 /// Scans the entire root directory for detailed project metadata.
 pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
-    let mut details = Vec::new();
-
     if !root.exists() {
-        return Ok(details);
+        return Ok(Vec::new());
     }
 
-    let entries = fs::read_dir(root).context(format!("Failed to read directory: {:?}", root))?;
+    let entries: Vec<_> = fs::read_dir(root)
+        .context(format!("Failed to read directory: {:?}", root))?
+        .flatten()
+        .filter(|e| {
+            e.path().is_dir()
+                && e.file_name()
+                    .to_str()
+                    .map(|s| !s.starts_with('.'))
+                    .unwrap_or(false)
+        })
+        .collect();
 
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-
-        if !path.is_dir() {
-            continue;
-        }
-
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with('.') {
-                continue;
-            }
+    let mut details: Vec<ProjectDetail> = entries
+        .into_par_iter()
+        .map(|entry| {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
 
             let stack = detect_stack(&path);
             let essence = extract_essence(&path);
@@ -217,18 +219,18 @@ pub fn scan_all_projects(root: &Path) -> Result<Vec<ProjectDetail>> {
                 Vec::new()
             };
 
-            details.push(ProjectDetail {
-                name: name.to_string(),
-                path: path.clone(),
+            ProjectDetail {
+                name,
+                path,
                 stack,
                 activity,
                 vcs_status,
                 essence,
                 hashtags,
                 sub_projects,
-            });
-        }
-    }
+            }
+        })
+        .collect();
 
     details.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(details)
