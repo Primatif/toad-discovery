@@ -144,6 +144,9 @@ pub fn find_projects(root: &Path, query: &str, limit: usize) -> Result<Vec<Strin
 }
 
 /// Scans the entire root directory for detailed project metadata.
+///
+/// This function leverages a thread-safe immutable snapshot of the `TagRegistry`
+/// to merge persistent user tags during the parallel discovery process.
 pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
     let root = &workspace.projects_dir;
     if !root.exists() {
