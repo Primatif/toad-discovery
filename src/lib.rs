@@ -209,7 +209,11 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
             let activity = detect_activity(&path);
             let vcs_status = detect_vcs_status(&path);
 
-            let sub_projects = if stack.contains("Monorepo") {
+            let sub_projects = if stack.contains("Monorepo")
+                || files.contains(&"nx.json".to_string())
+                || files.contains(&"turbo.json".to_string())
+                || files.contains(&"go.work".to_string())
+            {
                 discover_sub_projects(&path)
             } else {
                 Vec::new()
