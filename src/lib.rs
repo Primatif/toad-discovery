@@ -1,12 +1,11 @@
-mod strategies;
-
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
-pub use strategies::detect_stack;
-use toad_core::{ActivityTier, ProjectDetail, ProjectStack, TagRegistry, VcsStatus, Workspace};
+use toad_core::{
+    ActivityTier, ProjectDetail, TagRegistry, VcsStatus, Workspace, strategy::StrategyRegistry,
+};
 
 /// Extracts a high-level "Fingerprint" (mtime) of the workspace.
 pub fn get_workspace_fingerprint(root: &Path) -> Result<u64> {
@@ -82,46 +81,6 @@ pub fn detect_vcs_status(path: &Path) -> VcsStatus {
     }
 }
 
-/// Generates procedural hashtags based on project files and stack.
-pub fn generate_hashtags(path: &Path, stack: &ProjectStack) -> Vec<String> {
-    let mut tags = Vec::new();
-
-    match stack {
-        ProjectStack::Rust => tags.push("#rust".to_string()),
-        ProjectStack::Go => tags.push("#go".to_string()),
-        ProjectStack::NodeJS => tags.push("#nodejs".to_string()),
-        ProjectStack::Python => tags.push("#python".to_string()),
-        ProjectStack::Monorepo => tags.push("#monorepo".to_string()),
-        ProjectStack::Generic => {}
-    }
-
-    let files = fs::read_dir(path)
-        .ok()
-        .map(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .filter_map(|e| e.file_name().into_string().ok())
-                .collect::<Vec<String>>()
-        })
-        .unwrap_or_default();
-
-    if files.contains(&"Wails.json".to_string()) || files.contains(&"wails.json".to_string()) {
-        tags.push("#desktop".to_string());
-        tags.push("#wails".to_string());
-    }
-    if files.contains(&"Dockerfile".to_string()) {
-        tags.push("#docker".to_string());
-    }
-    if files.contains(&"tauri.conf.json".to_string()) {
-        tags.push("#tauri".to_string());
-        tags.push("#desktop".to_string());
-    }
-
-    tags.sort();
-    tags.dedup();
-    tags
-}
-
 /// Attempts to find sub-projects within a monorepo.
 pub fn discover_sub_projects(path: &Path) -> Vec<String> {
     let mut subs = Vec::new();
@@ -191,6 +150,7 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
         return Ok(Vec::new());
     }
 
+    let strategy_registry = StrategyRegistry::load()?;
     let tags_path = workspace.tags_path();
     let tag_registry = TagRegistry::load(&tags_path).unwrap_or_default();
 
@@ -209,12 +169,44 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
                 return None;
             }
 
-            let stack = detect_stack(&path);
+            // Identify evidence files
+            let files: Vec<String> = fs::read_dir(&path)
+                .ok()
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .filter_map(|e| e.file_name().into_string().ok())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let mut taxonomy = Vec::new();
+            let mut artifact_dirs = Vec::new();
+            let mut stack = "Generic".to_string();
+
+            for strategy in &strategy_registry.strategies {
+                if strategy.matches(&files) {
+                    for tag in &strategy.tags {
+                        if !taxonomy.contains(tag) {
+                            taxonomy.push(tag.clone());
+                        }
+                    }
+                    for artifact in &strategy.artifacts {
+                        if !artifact_dirs.contains(artifact) {
+                            artifact_dirs.push(artifact.clone());
+                        }
+                    }
+                    if stack == "Generic" {
+                        stack = strategy.name.clone();
+                    }
+                }
+            }
+
             let essence = extract_essence(&path);
-            let hashtags = generate_hashtags(&path, &stack);
             let activity = detect_activity(&path);
             let vcs_status = detect_vcs_status(&path);
-            let sub_projects = if stack == ProjectStack::Monorepo {
+
+            let sub_projects = if stack.contains("Monorepo") {
                 discover_sub_projects(&path)
             } else {
                 Vec::new()
@@ -222,7 +214,7 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
 
             // Merge persistent tags
             let persistent_tags = tag_registry.get_tags(&name);
-            let mut all_tags = hashtags.clone();
+            let mut all_tags = taxonomy.clone();
             for t in persistent_tags {
                 let tag_with_hash = if t.starts_with('#') {
                     t.clone()
@@ -242,8 +234,9 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
                 activity,
                 vcs_status,
                 essence,
-                hashtags,
                 tags: all_tags,
+                taxonomy,
+                artifact_dirs,
                 sub_projects,
             })
         })

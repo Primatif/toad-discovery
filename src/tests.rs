@@ -2,7 +2,7 @@ use crate::*;
 use std::fs;
 use std::time::{Duration, SystemTime};
 use tempfile::tempdir;
-use toad_core::{ActivityTier, ProjectStack, VcsStatus, Workspace};
+use toad_core::{ActivityTier, VcsStatus, Workspace};
 
 #[test]
 fn test_find_projects() {
@@ -38,10 +38,19 @@ fn test_activity_detection() -> Result<()> {
 }
 
 #[test]
-fn test_scan_all_projects() {
+fn test_scan_all_projects() -> Result<()> {
     let dir = tempdir().unwrap();
     let root = dir.path().to_path_buf();
     let ws = Workspace::with_root(root.clone());
+
+    // Setup strategies in the temp home
+    let config_dir = root.join(".toad");
+    unsafe {
+        std::env::set_var("TOAD_ROOT", root.to_str().unwrap());
+    }
+    let builtin_dir = config_dir.join("strategies/builtin");
+    fs::create_dir_all(&builtin_dir).unwrap();
+    toad_core::strategy::StrategyRegistry::install_defaults(&builtin_dir).unwrap();
 
     // Create projects dir
     fs::create_dir(root.join("projects")).unwrap();
@@ -59,34 +68,10 @@ fn test_scan_all_projects() {
     let projects = scan_all_projects(&ws).unwrap();
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].name, "rust_p");
-    assert_eq!(projects[0].stack, ProjectStack::Rust);
+    assert_eq!(projects[0].stack, "Rust");
     assert_eq!(projects[0].activity, ActivityTier::Active);
+    assert!(projects[0].taxonomy.contains(&"#rust".to_string()));
     assert!(projects[0].essence.is_some());
-}
-
-#[test]
-fn test_detect_stack_all() -> Result<()> {
-    let dir = tempdir()?;
-    let p = dir.path();
-
-    // Go
-    fs::write(p.join("go.mod"), "")?;
-    assert_eq!(detect_stack(p), ProjectStack::Go);
-    fs::remove_file(p.join("go.mod"))?;
-
-    // Node
-    fs::write(p.join("package.json"), "")?;
-    assert_eq!(detect_stack(p), ProjectStack::NodeJS);
-    fs::remove_file(p.join("package.json"))?;
-
-    // Python
-    fs::write(p.join("pyproject.toml"), "")?;
-    assert_eq!(detect_stack(p), ProjectStack::Python);
-    fs::remove_file(p.join("pyproject.toml"))?;
-
-    // Monorepo
-    fs::write(p.join("turbo.json"), "")?;
-    assert_eq!(detect_stack(p), ProjectStack::Monorepo);
     Ok(())
 }
 
@@ -109,19 +94,6 @@ fn test_detect_vcs_status() -> Result<()> {
     fs::write(p.join("new.txt"), "hi")?;
     assert_eq!(detect_vcs_status(p), VcsStatus::Untracked);
     Ok(())
-}
-
-#[test]
-fn test_generate_hashtags() {
-    let dir = tempdir().unwrap();
-    let p = dir.path();
-    fs::write(p.join("Dockerfile"), "").unwrap();
-    fs::write(p.join("tauri.conf.json"), "").unwrap();
-
-    let tags = generate_hashtags(p, &ProjectStack::Rust);
-    assert!(tags.contains(&"#docker".to_string()));
-    assert!(tags.contains(&"#tauri".to_string()));
-    assert!(tags.contains(&"#rust".to_string()));
 }
 
 #[test]
@@ -156,6 +128,16 @@ fn test_scan_all_projects_high_volume() -> Result<()> {
     let dir = tempdir()?;
     let root = dir.path().to_path_buf();
     let ws = Workspace::with_root(root.clone());
+
+    // Setup strategies in the temp home
+    let config_dir = root.join(".toad");
+    unsafe {
+        std::env::set_var("TOAD_ROOT", root.to_str().unwrap());
+    }
+    let builtin_dir = config_dir.join("strategies/builtin");
+    fs::create_dir_all(&builtin_dir).unwrap();
+    toad_core::strategy::StrategyRegistry::install_defaults(&builtin_dir).unwrap();
+
     fs::create_dir(root.join("projects"))?;
 
     for i in 0..50 {
