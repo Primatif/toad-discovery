@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rayon::prelude::*;
-use std::fs;
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use toad_core::{
@@ -190,6 +190,7 @@ fn scan_single_project(
     path: PathBuf,
     strategy_registry: &StrategyRegistry,
     tag_registry: &TagRegistry,
+    source: toad_core::TargetSource,
 ) -> Option<ProjectDetail> {
     let name = path.file_name()?.to_string_lossy().into_owned();
     if name.starts_with('.') {
@@ -254,7 +255,9 @@ fn scan_single_project(
             let p = entry.path();
             if p.is_dir() {
                 let entry_name = entry.file_name().to_string_lossy().into_owned();
-                if entry_name.starts_with('.') || entry_name == "node_modules" || entry_name == "target"
+                if entry_name.starts_with('.')
+                    || entry_name == "node_modules"
+                    || entry_name == "target"
                 {
                     continue;
                 }
@@ -309,6 +312,7 @@ fn scan_single_project(
         artifact_dirs,
         sub_projects,
         submodules,
+        source,
     })
 }
 
@@ -325,7 +329,12 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
 
     // 1. Scan the root itself (Hub awareness)
     let mut hub_submodule_paths: HashSet<PathBuf> = HashSet::new();
-    if let Some(hub_detail) = scan_single_project(workspace.root.clone(), &strategy_registry, &tag_registry) {
+    if let Some(hub_detail) = scan_single_project(
+        workspace.root.clone(),
+        &strategy_registry,
+        &tag_registry,
+        toad_core::TargetSource::HubRoot,
+    ) {
         // If the root has submodules or is a project itself, include it
         if !hub_detail.submodules.is_empty() || hub_detail.stack != "Generic" {
             // Collect absolute paths of Hub submodules so projects_dir scan can skip them
@@ -349,7 +358,12 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
                 if hub_submodule_paths.contains(&path) {
                     return None;
                 }
-                scan_single_project(path, &strategy_registry, &tag_registry)
+                scan_single_project(
+                    path,
+                    &strategy_registry,
+                    &tag_registry,
+                    toad_core::TargetSource::PondProject,
+                )
             })
             .collect();
         details.append(&mut projects);
