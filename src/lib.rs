@@ -144,18 +144,12 @@ pub fn find_projects(root: &Path, query: &str, limit: usize) -> Result<Vec<Strin
     Ok(matches)
 }
 
-fn scan_single_project(
-    path: PathBuf,
+fn get_project_metadata(
+    path: &Path,
     strategy_registry: &StrategyRegistry,
-    tag_registry: &TagRegistry,
-) -> Option<ProjectDetail> {
-    let name = path.file_name()?.to_string_lossy().into_owned();
-    if name.starts_with('.') {
-        return None;
-    }
-
+) -> (String, Vec<String>, Vec<String>, Option<String>) {
     // Identify evidence files
-    let files: Vec<String> = fs::read_dir(&path)
+    let files: Vec<String> = fs::read_dir(path)
         .ok()
         .map(|entries| {
             entries
@@ -187,9 +181,34 @@ fn scan_single_project(
         }
     }
 
-    let essence = extract_essence(&path);
+    let essence = extract_essence(path);
+    (stack, taxonomy, artifact_dirs, essence)
+}
+
+fn scan_single_project(
+    path: PathBuf,
+    strategy_registry: &StrategyRegistry,
+    tag_registry: &TagRegistry,
+) -> Option<ProjectDetail> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    if name.starts_with('.') {
+        return None;
+    }
+
+    let (stack, taxonomy, artifact_dirs, essence) = get_project_metadata(&path, strategy_registry);
+
     let activity = detect_activity(&path);
     let vcs_status = detect_vcs_status(&path);
+
+    let files: Vec<String> = fs::read_dir(&path)
+        .ok()
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let sub_projects = if stack.contains("Monorepo")
         || files.contains(&"nx.json".to_string())
@@ -205,6 +224,10 @@ fn scan_single_project(
     let mut submodules = Vec::new();
     if let Ok(info_list) = toad_git::submodule::parse_gitmodules(&path) {
         for info in info_list {
+            let sub_abs_path = path.join(&info.path);
+            let (sub_stack, sub_taxonomy, _, sub_essence) =
+                get_project_metadata(&sub_abs_path, strategy_registry);
+
             if let Ok((init, status, expected, actual)) =
                 toad_git::submodule::check_submodule_status(&path, &info.path)
             {
@@ -212,6 +235,9 @@ fn scan_single_project(
                     name: info.name,
                     path: info.path,
                     url: info.url,
+                    stack: sub_stack,
+                    essence: sub_essence,
+                    taxonomy: sub_taxonomy,
                     initialized: init,
                     vcs_status: status,
                     expected_commit: expected,
@@ -227,17 +253,24 @@ fn scan_single_project(
             let p = entry.path();
             if p.is_dir() {
                 let entry_name = entry.file_name().to_string_lossy().into_owned();
-                if entry_name.starts_with('.') || entry_name == "node_modules" || entry_name == "target" {
+                if entry_name.starts_with('.') || entry_name == "node_modules" || entry_name == "target"
+                {
                     continue;
                 }
-                
+
                 // If it's a git repo but not already tracked as a submodule
                 if p.join(".git").exists() && !submodules.iter().any(|s| p.ends_with(&s.path)) {
+                    let (sub_stack, sub_taxonomy, _, sub_essence) =
+                        get_project_metadata(&p, strategy_registry);
+
                     // Register as an "Orphan" submodule
                     submodules.push(SubmoduleDetail {
                         name: entry_name,
                         path: p.strip_prefix(&path).unwrap_or(&p).to_path_buf(),
                         url: "local".to_string(), // Or try to resolve remote
+                        stack: sub_stack,
+                        essence: sub_essence,
+                        taxonomy: sub_taxonomy,
                         initialized: true,
                         vcs_status: detect_vcs_status(&p),
                         expected_commit: None,
