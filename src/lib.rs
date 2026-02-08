@@ -351,8 +351,14 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
                         // Add persistent tags
                         let p_tags = tag_registry.get_tags(&sub.name);
                         for pt in p_tags {
-                            let with_hash = if pt.starts_with('#') { pt } else { format!("#{}", pt) };
-                            if !t.contains(&with_hash) { t.push(with_hash); }
+                            let with_hash = if pt.starts_with('#') {
+                                pt
+                            } else {
+                                format!("#{}", pt)
+                            };
+                            if !t.contains(&with_hash) {
+                                t.push(with_hash);
+                            }
                         }
                         t.sort();
                         t
