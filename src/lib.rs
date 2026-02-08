@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use std::fs;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use toad_core::{
@@ -323,9 +324,14 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
     let mut details = Vec::new();
 
     // 1. Scan the root itself (Hub awareness)
+    let mut hub_submodule_paths: HashSet<PathBuf> = HashSet::new();
     if let Some(hub_detail) = scan_single_project(workspace.root.clone(), &strategy_registry, &tag_registry) {
         // If the root has submodules or is a project itself, include it
         if !hub_detail.submodules.is_empty() || hub_detail.stack != "Generic" {
+            // Collect absolute paths of Hub submodules so projects_dir scan can skip them
+            for sub in &hub_detail.submodules {
+                hub_submodule_paths.insert(workspace.root.join(&sub.path));
+            }
             details.push(hub_detail);
         }
     }
@@ -338,13 +344,20 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
             .par_bridge()
             .filter_map(|entry_res| {
                 let entry = entry_res.ok()?;
-                scan_single_project(entry.path(), &strategy_registry, &tag_registry)
+                let path = entry.path();
+                // Skip entries already covered as Hub submodules
+                if hub_submodule_paths.contains(&path) {
+                    return None;
+                }
+                scan_single_project(path, &strategy_registry, &tag_registry)
             })
             .collect();
         details.append(&mut projects);
     }
 
+    // Dedup by path as a final safety net
     details.sort_by(|a, b| a.name.cmp(&b.name));
+    details.dedup_by(|a, b| a.path == b.path);
     Ok(details)
 }
 
