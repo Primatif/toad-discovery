@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use toad_core::{
-    ActivityTier, ProjectDetail, TagRegistry, VcsStatus, Workspace, strategy::StrategyRegistry,
+    ActivityTier, ProjectDetail, SubmoduleDetail, TagRegistry, VcsStatus, Workspace,
+    strategy::StrategyRegistry,
 };
 
 /// Extracts a high-level "Fingerprint" (mtime) of the workspace.
@@ -143,111 +144,172 @@ pub fn find_projects(root: &Path, query: &str, limit: usize) -> Result<Vec<Strin
     Ok(matches)
 }
 
+fn scan_single_project(
+    path: PathBuf,
+    strategy_registry: &StrategyRegistry,
+    tag_registry: &TagRegistry,
+) -> Option<ProjectDetail> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    if name.starts_with('.') {
+        return None;
+    }
+
+    // Identify evidence files
+    let files: Vec<String> = fs::read_dir(&path)
+        .ok()
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut taxonomy = Vec::new();
+    let mut artifact_dirs = Vec::new();
+    let mut stack = "Generic".to_string();
+
+    for strategy in &strategy_registry.strategies {
+        if strategy.matches(&files) {
+            for tag in &strategy.tags {
+                if !taxonomy.contains(tag) {
+                    taxonomy.push(tag.clone());
+                }
+            }
+            for artifact in &strategy.artifacts {
+                if !artifact_dirs.contains(artifact) {
+                    artifact_dirs.push(artifact.clone());
+                }
+            }
+            if stack == "Generic" {
+                stack = strategy.name.clone();
+            }
+        }
+    }
+
+    let essence = extract_essence(&path);
+    let activity = detect_activity(&path);
+    let vcs_status = detect_vcs_status(&path);
+
+    let sub_projects = if stack.contains("Monorepo")
+        || files.contains(&"nx.json".to_string())
+        || files.contains(&"turbo.json".to_string())
+        || files.contains(&"go.work".to_string())
+    {
+        discover_sub_projects(&path)
+    } else {
+        Vec::new()
+    };
+
+    // Submodule & Orphan Discovery
+    let mut submodules = Vec::new();
+    if let Ok(info_list) = toad_git::submodule::parse_gitmodules(&path) {
+        for info in info_list {
+            if let Ok((init, status, expected, actual)) =
+                toad_git::submodule::check_submodule_status(&path, &info.path)
+            {
+                submodules.push(SubmoduleDetail {
+                    name: info.name,
+                    path: info.path,
+                    url: info.url,
+                    initialized: init,
+                    vcs_status: status,
+                    expected_commit: expected,
+                    actual_commit: actual,
+                });
+            }
+        }
+    }
+
+    // Orphan Detection (child dirs with .git but not in submodules)
+    if let Ok(entries) = fs::read_dir(&path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                let entry_name = entry.file_name().to_string_lossy().into_owned();
+                if entry_name.starts_with('.') || entry_name == "node_modules" || entry_name == "target" {
+                    continue;
+                }
+                
+                // If it's a git repo but not already tracked as a submodule
+                if p.join(".git").exists() && !submodules.iter().any(|s| p.ends_with(&s.path)) {
+                    // Register as an "Orphan" submodule
+                    submodules.push(SubmoduleDetail {
+                        name: entry_name,
+                        path: p.strip_prefix(&path).unwrap_or(&p).to_path_buf(),
+                        url: "local".to_string(), // Or try to resolve remote
+                        initialized: true,
+                        vcs_status: detect_vcs_status(&p),
+                        expected_commit: None,
+                        actual_commit: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Merge persistent tags
+    let persistent_tags = tag_registry.get_tags(&name);
+    let mut all_tags = taxonomy.clone();
+    for t in persistent_tags {
+        let tag_with_hash = if t.starts_with('#') {
+            t.clone()
+        } else {
+            format!("#{}", t)
+        };
+        if !all_tags.contains(&tag_with_hash) {
+            all_tags.push(tag_with_hash);
+        }
+    }
+    all_tags.sort();
+
+    Some(ProjectDetail {
+        name,
+        path,
+        stack,
+        activity,
+        vcs_status,
+        essence,
+        tags: all_tags,
+        taxonomy,
+        artifact_dirs,
+        sub_projects,
+        submodules,
+    })
+}
+
 /// Scans the entire root directory for detailed project metadata.
 ///
 /// This function leverages a thread-safe immutable snapshot of the `TagRegistry`
 /// to merge persistent user tags during the parallel discovery process.
 pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
-    let root = &workspace.projects_dir;
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-
     let strategy_registry = StrategyRegistry::load()?;
     let tags_path = workspace.tags_path();
     let tag_registry = TagRegistry::load(&tags_path).unwrap_or_default();
 
-    let mut details: Vec<ProjectDetail> = fs::read_dir(root)
-        .context(format!("Failed to read directory: {:?}", root))?
-        .par_bridge()
-        .filter_map(|entry_res| {
-            let entry = entry_res.ok()?;
-            let path = entry.path();
-            if !path.is_dir() {
-                return None;
-            }
+    let mut details = Vec::new();
 
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                return None;
-            }
+    // 1. Scan the root itself (Hub awareness)
+    if let Some(hub_detail) = scan_single_project(workspace.root.clone(), &strategy_registry, &tag_registry) {
+        // If the root has submodules or is a project itself, include it
+        if !hub_detail.submodules.is_empty() || hub_detail.stack != "Generic" {
+            details.push(hub_detail);
+        }
+    }
 
-            // Identify evidence files
-            let files: Vec<String> = fs::read_dir(&path)
-                .ok()
-                .map(|entries| {
-                    entries
-                        .filter_map(|e| e.ok())
-                        .filter_map(|e| e.file_name().into_string().ok())
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let mut taxonomy = Vec::new();
-            let mut artifact_dirs = Vec::new();
-            let mut stack = "Generic".to_string();
-
-            for strategy in &strategy_registry.strategies {
-                if strategy.matches(&files) {
-                    for tag in &strategy.tags {
-                        if !taxonomy.contains(tag) {
-                            taxonomy.push(tag.clone());
-                        }
-                    }
-                    for artifact in &strategy.artifacts {
-                        if !artifact_dirs.contains(artifact) {
-                            artifact_dirs.push(artifact.clone());
-                        }
-                    }
-                    if stack == "Generic" {
-                        stack = strategy.name.clone();
-                    }
-                }
-            }
-
-            let essence = extract_essence(&path);
-            let activity = detect_activity(&path);
-            let vcs_status = detect_vcs_status(&path);
-
-            let sub_projects = if stack.contains("Monorepo")
-                || files.contains(&"nx.json".to_string())
-                || files.contains(&"turbo.json".to_string())
-                || files.contains(&"go.work".to_string())
-            {
-                discover_sub_projects(&path)
-            } else {
-                Vec::new()
-            };
-
-            // Merge persistent tags
-            let persistent_tags = tag_registry.get_tags(&name);
-            let mut all_tags = taxonomy.clone();
-            for t in persistent_tags {
-                let tag_with_hash = if t.starts_with('#') {
-                    t.clone()
-                } else {
-                    format!("#{}", t)
-                };
-                if !all_tags.contains(&tag_with_hash) {
-                    all_tags.push(tag_with_hash);
-                }
-            }
-            all_tags.sort();
-
-            Some(ProjectDetail {
-                name,
-                path,
-                stack,
-                activity,
-                vcs_status,
-                essence,
-                tags: all_tags,
-                taxonomy,
-                artifact_dirs,
-                sub_projects,
+    // 2. Scan projects directory (legacy/standard layout)
+    let root = &workspace.projects_dir;
+    if root.exists() {
+        let mut projects: Vec<ProjectDetail> = fs::read_dir(root)
+            .context(format!("Failed to read directory: {:?}", root))?
+            .par_bridge()
+            .filter_map(|entry_res| {
+                let entry = entry_res.ok()?;
+                scan_single_project(entry.path(), &strategy_registry, &tag_registry)
             })
-        })
-        .collect();
+            .collect();
+        details.append(&mut projects);
+    }
 
     details.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(details)
