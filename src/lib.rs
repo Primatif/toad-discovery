@@ -317,9 +317,6 @@ fn scan_single_project(
 }
 
 /// Scans the entire root directory for detailed project metadata.
-///
-/// This function leverages a thread-safe immutable snapshot of the `TagRegistry`
-/// to merge persistent user tags during the parallel discovery process.
 pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
     let strategy_registry = StrategyRegistry::load()?;
     let tags_path = workspace.tags_path();
@@ -340,6 +337,32 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
             // Collect absolute paths of Hub submodules so projects_dir scan can skip them
             for sub in &hub_detail.submodules {
                 hub_submodule_paths.insert(workspace.root.join(&sub.path));
+
+                // FLATTENING: Add submodule as a peer project for search/ops
+                details.push(ProjectDetail {
+                    name: sub.name.clone(),
+                    path: workspace.root.join(&sub.path),
+                    stack: sub.stack.clone(),
+                    activity: detect_activity(&workspace.root.join(&sub.path)),
+                    vcs_status: sub.vcs_status.clone(),
+                    essence: sub.essence.clone(),
+                    tags: {
+                        let mut t = sub.taxonomy.clone();
+                        // Add persistent tags
+                        let p_tags = tag_registry.get_tags(&sub.name);
+                        for pt in p_tags {
+                            let with_hash = if pt.starts_with('#') { pt } else { format!("#{}", pt) };
+                            if !t.contains(&with_hash) { t.push(with_hash); }
+                        }
+                        t.sort();
+                        t
+                    },
+                    taxonomy: sub.taxonomy.clone(),
+                    artifact_dirs: Vec::new(), // Submodules don't have artifacts mapped yet
+                    sub_projects: Vec::new(),
+                    submodules: Vec::new(),
+                    source: toad_core::TargetSource::Submodule,
+                });
             }
             details.push(hub_detail);
         }
