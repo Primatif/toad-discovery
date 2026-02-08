@@ -41,7 +41,7 @@ fn test_activity_detection() -> Result<()> {
 fn test_scan_all_projects() -> Result<()> {
     let dir = tempdir().unwrap();
     let root = dir.path().to_path_buf();
-    let ws = Workspace::with_root(root.clone());
+    let ws = Workspace::with_root(root.clone(), None, None);
 
     // Setup strategies in the temp home
     let config_dir = root.join(".toad");
@@ -127,7 +127,7 @@ fn test_discover_sub_projects() -> Result<()> {
 fn test_scan_all_projects_high_volume() -> Result<()> {
     let dir = tempdir()?;
     let root = dir.path().to_path_buf();
-    let ws = Workspace::with_root(root.clone());
+    let ws = Workspace::with_root(root.clone(), None, None);
 
     // Setup strategies in the temp home
     let config_dir = root.join(".toad");
