@@ -69,16 +69,16 @@ pub fn generate_status_report(workspace: &Workspace) -> Result<StatusReport> {
         // Check for submodule alignment issues
         for sub in &p.submodules {
             if sub.initialized {
-                if let (Some(expected), Some(actual)) = (&sub.expected_commit, &sub.actual_commit) {
-                    if expected != actual {
-                        is_aligned = false;
-                        issues.push(format!(
-                            "Submodule '{}' is out of alignment (expected {}..., found {})",
-                            sub.name,
-                            &expected[..7],
-                            &actual[..7]
-                        ));
-                    }
+                if let (Some(expected), Some(actual)) = (&sub.expected_commit, &sub.actual_commit)
+                    && expected != actual
+                {
+                    is_aligned = false;
+                    issues.push(format!(
+                        "Submodule '{}' is out of alignment (expected {}..., found {})",
+                        sub.name,
+                        &expected[..7],
+                        &actual[..7]
+                    ));
                 }
             } else {
                 is_aligned = false;
