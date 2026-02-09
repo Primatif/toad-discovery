@@ -1,12 +1,32 @@
 use crate::scanner::scan_all_projects;
-use anyhow::Result;
-use toad_core::{ContextType, ProjectStatus, SearchResult, StatusReport, VcsStatus, Workspace};
+use toad_core::{
+    ContextType, ProgressReporter, ProjectStatus, SearchResult, StatusReport, ToadResult,
+    VcsStatus, Workspace,
+};
+
+pub fn sync_registry(workspace: &Workspace, reporter: &dyn ProgressReporter) -> ToadResult<usize> {
+    reporter.set_message("Discovering projects on disk...");
+    let fingerprint = workspace.get_fingerprint()?;
+    let projects = scan_all_projects(workspace)?;
+
+    reporter.set_message("Saving to registry...");
+    let registry = toad_core::ProjectRegistry {
+        fingerprint,
+        projects,
+        last_sync: std::time::SystemTime::now(),
+    };
+    registry.save(workspace.active_context.as_deref(), None)?;
+
+    let count = registry.projects.len();
+    reporter.finish_with_message("SUCCESS: Registry synchronized.");
+    Ok(count)
+}
 
 pub fn search_projects(
     workspace: &Workspace,
     query: &str,
     tag: Option<&str>,
-) -> Result<SearchResult> {
+) -> ToadResult<SearchResult> {
     let registry = toad_core::ProjectRegistry::load(workspace.active_context.as_deref(), None)
         .unwrap_or_default();
     let current_fp = workspace.get_fingerprint().unwrap_or(0);
@@ -49,7 +69,7 @@ pub fn search_projects(
     })
 }
 
-pub fn generate_status_report(workspace: &Workspace) -> Result<StatusReport> {
+pub fn generate_status_report(workspace: &Workspace) -> ToadResult<StatusReport> {
     let projects = scan_all_projects(workspace)?;
     let mut status_projects = Vec::new();
 

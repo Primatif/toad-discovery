@@ -1,20 +1,22 @@
 use crate::detection::{
     detect_activity, detect_vcs_status, discover_sub_projects, extract_essence,
 };
-use anyhow::{Context, Result};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use toad_core::{
-    ProjectDetail, SubmoduleDetail, TagRegistry, Workspace, strategy::StrategyRegistry,
+    ProjectDetail, SubmoduleDetail, TagRegistry, ToadError, ToadResult, Workspace,
+    strategy::StrategyRegistry,
 };
 
-pub fn find_projects(root: &Path, query: &str, limit: usize) -> Result<Vec<String>> {
+pub fn find_projects(root: &Path, query: &str, limit: usize) -> ToadResult<Vec<String>> {
     let mut matches = Vec::new();
     let query_lower = query.to_lowercase();
 
-    let entries = fs::read_dir(root).context(format!("Failed to read directory: {:?}", root))?;
+    let entries = fs::read_dir(root).map_err(|e| {
+        ToadError::Discovery(format!("Failed to read directory: {:?}: {}", root, e))
+    })?;
 
     for entry in entries {
         let entry = entry?;
@@ -131,7 +133,7 @@ pub fn scan_single_project(
             {
                 submodules.push(SubmoduleDetail {
                     name: info.name,
-                    path: info.path,
+                    path: info.path.into(),
                     url: info.url,
                     stack: sub_stack,
                     essence: sub_essence,
@@ -208,7 +210,7 @@ pub fn scan_single_project(
     })
 }
 
-pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
+pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>> {
     let strategy_registry = StrategyRegistry::load()?;
     let tags_path = workspace.tags_path();
     let tag_registry = TagRegistry::load(&tags_path).unwrap_or_default();
@@ -262,7 +264,9 @@ pub fn scan_all_projects(workspace: &Workspace) -> Result<Vec<ProjectDetail>> {
     let root = &workspace.projects_dir;
     if root.exists() {
         let mut projects: Vec<ProjectDetail> = fs::read_dir(root)
-            .context(format!("Failed to read directory: {:?}", root))?
+            .map_err(|e| {
+                ToadError::Discovery(format!("Failed to read directory: {:?}: {}", root, e))
+            })?
             .par_bridge()
             .filter_map(|entry_res| {
                 let entry = entry_res.ok()?;

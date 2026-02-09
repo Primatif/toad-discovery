@@ -1,8 +1,8 @@
 use crate::*;
-use anyhow::Result;
 use std::fs;
 use std::time::{Duration, SystemTime};
 use tempfile::tempdir;
+use toad_core::ToadResult;
 use toad_core::{ActivityTier, VcsStatus, Workspace};
 
 #[test]
@@ -20,7 +20,7 @@ fn test_find_projects() {
 }
 
 #[test]
-fn test_activity_detection() -> Result<()> {
+fn test_activity_detection() -> ToadResult<()> {
     let dir = tempdir().unwrap();
     let path = dir.path().join("active_proj");
     fs::create_dir(&path).unwrap();
@@ -39,7 +39,7 @@ fn test_activity_detection() -> Result<()> {
 }
 
 #[test]
-fn test_scan_all_projects() -> Result<()> {
+fn test_scan_all_projects() -> ToadResult<()> {
     let dir = tempdir().unwrap();
     let root = dir.path().to_path_buf();
     let ws = Workspace::with_root(root.clone(), None, None);
@@ -77,7 +77,7 @@ fn test_scan_all_projects() -> Result<()> {
 }
 
 #[test]
-fn test_detect_vcs_status() -> Result<()> {
+fn test_detect_vcs_status() -> ToadResult<()> {
     let dir = tempdir()?;
     let p = dir.path();
 
@@ -98,7 +98,7 @@ fn test_detect_vcs_status() -> Result<()> {
 }
 
 #[test]
-fn test_extract_essence_truncation() -> Result<()> {
+fn test_extract_essence_truncation() -> ToadResult<()> {
     let dir = tempdir()?;
     let p = dir.path();
     let long_readme = "Long line. ".repeat(100);
@@ -111,7 +111,7 @@ fn test_extract_essence_truncation() -> Result<()> {
 }
 
 #[test]
-fn test_discover_sub_projects() -> Result<()> {
+fn test_discover_sub_projects() -> ToadResult<()> {
     let dir = tempdir()?;
     let p = dir.path();
     let crates_dir = p.join("crates");
@@ -125,7 +125,7 @@ fn test_discover_sub_projects() -> Result<()> {
 }
 
 #[test]
-fn test_scan_all_projects_high_volume() -> Result<()> {
+fn test_scan_all_projects_high_volume() -> ToadResult<()> {
     let dir = tempdir()?;
     let root = dir.path().to_path_buf();
     let ws = Workspace::with_root(root.clone(), None, None);
