@@ -117,7 +117,7 @@ pub fn generate_status_report(workspace: &Workspace) -> ToadResult<StatusReport>
         status_projects.len()
     );
 
-    let context_type = if workspace.root.join(".gitmodules").exists() {
+    let context_type = if workspace.projects_dir.join(".gitmodules").exists() {
         ContextType::Hub
     } else if workspace.projects_dir.exists() {
         ContextType::Pond

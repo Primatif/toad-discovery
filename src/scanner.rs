@@ -91,6 +91,9 @@ pub fn scan_single_project(
     tag_registry: &TagRegistry,
     source: toad_core::TargetSource,
 ) -> Option<ProjectDetail> {
+    if !path.is_dir() {
+        return None;
+    }
     let name = path.file_name()?.to_string_lossy().into_owned();
     if name.starts_with('.') {
         return None;
@@ -217,52 +220,55 @@ pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>
 
     let mut details = Vec::new();
 
-    let mut hub_submodule_paths: HashSet<PathBuf> = HashSet::new();
-    if let Some(hub_detail) = scan_single_project(
-        workspace.root.clone(),
-        &strategy_registry,
-        &tag_registry,
-        toad_core::TargetSource::HubRoot,
-    ) && (!hub_detail.submodules.is_empty() || hub_detail.stack != "Generic")
-    {
-        for sub in &hub_detail.submodules {
-            hub_submodule_paths.insert(workspace.root.join(&sub.path));
-
-            details.push(ProjectDetail {
-                name: sub.name.clone(),
-                path: workspace.root.join(&sub.path),
-                stack: sub.stack.clone(),
-                activity: detect_activity(&workspace.root.join(&sub.path)),
-                vcs_status: sub.vcs_status.clone(),
-                essence: sub.essence.clone(),
-                tags: {
-                    let mut t = sub.taxonomy.clone();
-                    let p_tags = tag_registry.get_tags(&sub.name);
-                    for pt in p_tags {
-                        let with_hash = if pt.starts_with('#') {
-                            pt
-                        } else {
-                            format!("#{}", pt)
-                        };
-                        if !t.contains(&with_hash) {
-                            t.push(with_hash);
-                        }
-                    }
-                    t.sort();
-                    t
-                },
-                taxonomy: sub.taxonomy.clone(),
-                artifact_dirs: Vec::new(),
-                sub_projects: Vec::new(),
-                submodules: Vec::new(),
-                source: toad_core::TargetSource::Submodule,
-            });
-        }
-        details.push(hub_detail);
-    }
-
+    // In v1.1.0, projects_dir is where we look for projects.
+    // If the projects_dir itself is a project (Hub style), we scan it first.
     let root = &workspace.projects_dir;
+    let mut hub_submodule_paths: HashSet<PathBuf> = HashSet::new();
+
     if root.exists() {
+        if let Some(hub_detail) = scan_single_project(
+            root.clone(),
+            &strategy_registry,
+            &tag_registry,
+            toad_core::TargetSource::HubRoot,
+        ) && (!hub_detail.submodules.is_empty() || hub_detail.stack != "Generic")
+        {
+            for sub in &hub_detail.submodules {
+                hub_submodule_paths.insert(root.join(&sub.path));
+
+                details.push(ProjectDetail {
+                    name: sub.name.clone(),
+                    path: root.join(&sub.path),
+                    stack: sub.stack.clone(),
+                    activity: detect_activity(&root.join(&sub.path)),
+                    vcs_status: sub.vcs_status.clone(),
+                    essence: sub.essence.clone(),
+                    tags: {
+                        let mut t = sub.taxonomy.clone();
+                        let p_tags = tag_registry.get_tags(&sub.name);
+                        for pt in p_tags {
+                            let with_hash = if pt.starts_with('#') {
+                                pt
+                            } else {
+                                format!("#{}", pt)
+                            };
+                            if !t.contains(&with_hash) {
+                                t.push(with_hash);
+                            }
+                        }
+                        t.sort();
+                        t
+                    },
+                    taxonomy: sub.taxonomy.clone(),
+                    artifact_dirs: Vec::new(),
+                    sub_projects: Vec::new(),
+                    submodules: Vec::new(),
+                    source: toad_core::TargetSource::Submodule,
+                });
+            }
+            details.push(hub_detail);
+        }
+
         let mut projects: Vec<ProjectDetail> = fs::read_dir(root)
             .map_err(|e| {
                 ToadError::Discovery(format!("Failed to read directory: {:?}: {}", root, e))
