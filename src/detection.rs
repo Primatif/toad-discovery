@@ -8,26 +8,41 @@ pub fn extract_essence(project_path: &Path) -> Option<String> {
     for name in readme_names {
         let path = project_path.join(name);
         if let Ok(content) = fs::read_to_string(&path) {
-            let lines: Vec<String> = content
-                .lines()
-                .map(|l| l.trim())
-                .filter(|l| {
-                    !l.is_empty()
-                        && !l.starts_with("#")
-                        && !l.starts_with("![")
-                        && !l.starts_with("[![")
-                        && !l.starts_with("<")
-                        && !l.starts_with("[")
-                })
-                .take(10)
-                .map(|l| l.to_string())
-                .collect();
+            let mut extracted = Vec::new();
+            let mut char_count = 0;
+            let limit = 800; // Raised limit for better semantic depth
 
-            if !lines.is_empty() {
-                let combined = lines.join(" ");
-                if combined.len() > 600 {
-                    return Some(format!("{}...", &combined[..597]));
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
                 }
+
+                // Filter out noise (badges, images, html)
+                if trimmed.starts_with("![") || trimmed.starts_with("[![") || trimmed.starts_with("<") {
+                    continue;
+                }
+
+                // Keep headers as context markers
+                let is_header = trimmed.starts_with('#');
+                
+                // Look for capability indicators
+                let has_capability = trimmed.to_lowercase().contains("provides") 
+                    || trimmed.to_lowercase().contains("exposes")
+                    || trimmed.to_lowercase().contains("main entry")
+                    || trimmed.to_lowercase().contains("orchestrates");
+
+                if is_header || has_capability || extracted.len() < 15 {
+                    if char_count + trimmed.len() > limit {
+                        break;
+                    }
+                    extracted.push(trimmed.to_string());
+                    char_count += trimmed.len() + 1;
+                }
+            }
+
+            if !extracted.is_empty() {
+                let combined = extracted.join(" ");
                 return Some(combined);
             }
         }

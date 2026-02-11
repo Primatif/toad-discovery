@@ -197,6 +197,10 @@ pub fn scan_single_project(
     }
     all_tags.sort();
 
+    // Calculate stats
+    let artifact_set: std::collections::HashSet<&str> = artifact_dirs.iter().map(|s| s.as_str()).collect();
+    let stats = toad_ops::stats::calculate_project_stats(&path, &artifact_set);
+
     Some(ProjectDetail {
         name,
         path,
@@ -210,6 +214,8 @@ pub fn scan_single_project(
         sub_projects,
         submodules,
         source,
+        total_size: stats.total_bytes,
+        bloat_index: stats.bloat_index,
     })
 }
 
@@ -250,36 +256,37 @@ pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>
                 let sub_abs_path = codebase_root.join(&sub.path);
                 hub_submodule_paths.insert(sub_abs_path.clone());
 
-                details.push(ProjectDetail {
-                    name: sub.name.clone(),
-                    path: sub_abs_path,
-                    stack: sub.stack.clone(),
-                    activity: detect_activity(&codebase_root.join(&sub.path)),
-                    vcs_status: sub.vcs_status.clone(),
-                    essence: sub.essence.clone(),
-                    tags: {
-                        let mut t = sub.taxonomy.clone();
-                        let p_tags = tag_registry.get_tags(&sub.name);
-                        for pt in p_tags {
-                            let with_hash = if pt.starts_with('#') {
-                                pt
-                            } else {
-                                format!("#{}", pt)
-                            };
-                            if !t.contains(&with_hash) {
-                                t.push(with_hash);
-                            }
-                        }
-                        t.sort();
-                        t
-                    },
-                    taxonomy: sub.taxonomy.clone(),
-                    artifact_dirs: Vec::new(),
-                    sub_projects: Vec::new(),
-                    submodules: Vec::new(),
-                    source: toad_core::TargetSource::Submodule,
-                });
-            }
+                                    details.push(ProjectDetail {
+                                        name: sub.name.clone(),
+                                        path: sub_abs_path,
+                                        stack: sub.stack.clone(),
+                                        activity: detect_activity(&codebase_root.join(&sub.path)),
+                                        vcs_status: sub.vcs_status.clone(),
+                                        essence: sub.essence.clone(),
+                                        tags: {
+                                            let mut t = sub.taxonomy.clone();
+                                            let p_tags = tag_registry.get_tags(&sub.name);
+                                            for pt in p_tags {
+                                                let with_hash = if pt.starts_with('#') {
+                                                    pt
+                                                } else {
+                                                    format!("#{}", pt)
+                                                };
+                                                if !t.contains(&with_hash) {
+                                                    t.push(with_hash);
+                                                }
+                                            }
+                                            t.sort();
+                                            t
+                                        },
+                                        taxonomy: sub.taxonomy.clone(),
+                                        artifact_dirs: Vec::new(),
+                                        sub_projects: Vec::new(),
+                                        submodules: Vec::new(),
+                                        source: toad_core::TargetSource::Submodule,
+                                        total_size: 0, // Stats for submodules could be calculated, but 0 for now
+                                        bloat_index: 0.0,
+                                    });            }
             
             // Only add hub root if it's not the same as projects_dir
             if codebase_root != root {
