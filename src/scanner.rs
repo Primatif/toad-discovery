@@ -221,26 +221,40 @@ pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>
     let mut details = Vec::new();
 
     // In v1.1.0, projects_dir is where we look for projects.
-    // If the projects_dir itself is a project (Hub style), we scan it first.
+    // If we are in a Hub style setup, we also scan the workspace root itself.
     let root = &workspace.projects_dir;
     let mut hub_submodule_paths: HashSet<PathBuf> = HashSet::new();
 
-    if root.exists() {
+    // The codebase root is either the projects_dir itself (if it's a project)
+    // or its parent (if projects_dir is a 'projects/' subdirectory of a workspace).
+    let codebase_root = if root.file_name().and_then(|n| n.to_str()) == Some("projects") {
+        let parent = root.parent().unwrap_or(root);
+        if parent.join(".toad-root").exists() || parent.join(".gitmodules").exists() {
+            parent
+        } else {
+            root
+        }
+    } else {
+        root
+    };
+
+    if codebase_root.exists() {
         if let Some(hub_detail) = scan_single_project(
-            root.clone(),
+            codebase_root.to_path_buf(),
             &strategy_registry,
             &tag_registry,
             toad_core::TargetSource::HubRoot,
-        ) && (!hub_detail.submodules.is_empty() || hub_detail.stack != "Generic")
+        ) && (!hub_detail.submodules.is_empty() || (hub_detail.stack != "Generic" && codebase_root != root))
         {
             for sub in &hub_detail.submodules {
-                hub_submodule_paths.insert(root.join(&sub.path));
+                let sub_abs_path = codebase_root.join(&sub.path);
+                hub_submodule_paths.insert(sub_abs_path.clone());
 
                 details.push(ProjectDetail {
                     name: sub.name.clone(),
-                    path: root.join(&sub.path),
+                    path: sub_abs_path,
                     stack: sub.stack.clone(),
-                    activity: detect_activity(&root.join(&sub.path)),
+                    activity: detect_activity(&codebase_root.join(&sub.path)),
                     vcs_status: sub.vcs_status.clone(),
                     essence: sub.essence.clone(),
                     tags: {
@@ -266,9 +280,15 @@ pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>
                     source: toad_core::TargetSource::Submodule,
                 });
             }
-            details.push(hub_detail);
+            
+            // Only add hub root if it's not the same as projects_dir
+            if codebase_root != root {
+                details.push(hub_detail);
+            }
         }
+    }
 
+    if root.exists() {
         let mut projects: Vec<ProjectDetail> = fs::read_dir(root)
             .map_err(|e| {
                 ToadError::Discovery(format!("Failed to read directory: {:?}: {}", root, e))
@@ -277,6 +297,12 @@ pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>
             .filter_map(|entry_res| {
                 let entry = entry_res.ok()?;
                 let path = entry.path();
+                
+                // Skip 'projects' folder itself if we are scanning it
+                if path.file_name().and_then(|n| n.to_str()) == Some("projects") {
+                    return None;
+                }
+
                 if hub_submodule_paths.contains(&path) {
                     return None;
                 }

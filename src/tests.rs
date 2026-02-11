@@ -1,9 +1,12 @@
 use crate::*;
 use std::fs;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 use tempfile::tempdir;
 use toad_core::ToadResult;
 use toad_core::{ActivityTier, VcsStatus, Workspace};
+
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 #[test]
 fn test_find_projects() {
@@ -40,18 +43,23 @@ fn test_activity_detection() -> ToadResult<()> {
 
 #[test]
 fn test_scan_all_projects() -> ToadResult<()> {
+    let _lock = ENV_MUTEX.lock().unwrap();
     let dir = tempdir().unwrap();
-    let root = dir.path().to_path_buf();
-    let ws = Workspace::with_root(root.clone(), None, None);
-
-    // Setup strategies in the temp home
+    let root = fs::canonicalize(dir.path())?;
+    
+    // Mock config dir to avoid real ~/.toad
     let config_dir = root.join(".toad");
+    fs::create_dir_all(&config_dir)?;
     unsafe {
-        std::env::set_var("TOAD_ROOT", root.to_str().unwrap());
+        std::env::set_var("TOAD_CONFIG_DIR", config_dir.to_str().unwrap());
     }
-    let builtin_dir = config_dir.join("strategies/builtin");
-    fs::create_dir_all(&builtin_dir).unwrap();
-    toad_core::strategy::StrategyRegistry::install_defaults(&builtin_dir).unwrap();
+
+    let ws = Workspace {
+        toad_home: config_dir,
+        projects_dir: root.join("projects"),
+        shadows_dir: root.join(".toad/shadows"),
+        active_context: None,
+    };
 
     // Create projects dir
     fs::create_dir(root.join("projects")).unwrap();
@@ -126,18 +134,23 @@ fn test_discover_sub_projects() -> ToadResult<()> {
 
 #[test]
 fn test_scan_all_projects_high_volume() -> ToadResult<()> {
+    let _lock = ENV_MUTEX.lock().unwrap();
     let dir = tempdir()?;
-    let root = dir.path().to_path_buf();
-    let ws = Workspace::with_root(root.clone(), None, None);
-
-    // Setup strategies in the temp home
+    let root = fs::canonicalize(dir.path())?;
+    
+    // Mock config dir
     let config_dir = root.join(".toad");
+    fs::create_dir_all(&config_dir)?;
     unsafe {
-        std::env::set_var("TOAD_ROOT", root.to_str().unwrap());
+        std::env::set_var("TOAD_CONFIG_DIR", config_dir.to_str().unwrap());
     }
-    let builtin_dir = config_dir.join("strategies/builtin");
-    fs::create_dir_all(&builtin_dir).unwrap();
-    toad_core::strategy::StrategyRegistry::install_defaults(&builtin_dir).unwrap();
+
+    let ws = Workspace {
+        toad_home: config_dir,
+        projects_dir: root.join("projects"),
+        shadows_dir: root.join(".toad/shadows"),
+        active_context: None,
+    };
 
     fs::create_dir(root.join("projects"))?;
 
