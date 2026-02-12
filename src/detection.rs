@@ -33,11 +33,22 @@ pub fn extract_essence(project_path: &Path) -> Option<String> {
                     || trimmed.to_lowercase().contains("orchestrates");
 
                 if is_header || has_capability || extracted.len() < 15 {
-                    if char_count + trimmed.len() > limit {
+                    let mut to_add = trimmed.to_string();
+                    if char_count + to_add.len() > limit {
+                        let allowed = if limit > char_count { limit - char_count } else { 0 };
+                        if allowed > 3 {
+                            to_add.truncate(allowed - 3);
+                            to_add.push_str("...");
+                        } else {
+                            break;
+                        }
+                    }
+                    extracted.push(to_add.clone());
+                    char_count += to_add.len() + 1;
+                    
+                    if char_count >= limit {
                         break;
                     }
-                    extracted.push(trimmed.to_string());
-                    char_count += trimmed.len() + 1;
                 }
             }
 

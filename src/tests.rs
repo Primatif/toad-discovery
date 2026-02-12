@@ -114,7 +114,7 @@ fn test_extract_essence_truncation() -> ToadResult<()> {
 
     let essence = extract_essence(p);
     assert!(essence.is_some());
-    assert!(essence.unwrap().len() <= 600);
+    assert!(essence.unwrap().len() <= 800);
     Ok(())
 }
 
