@@ -160,11 +160,28 @@ pub fn search_projects(
     })
 }
 
-pub fn generate_status_report(workspace: &Workspace) -> ToadResult<StatusReport> {
+pub fn generate_status_report(workspace: &Workspace, query: Option<&str>, tag: Option<&str>) -> ToadResult<StatusReport> {
     let projects = scan_all_projects(workspace)?;
     let mut status_projects = Vec::new();
 
-    for p in &projects {
+    for p in projects {
+        if let Some(q) = query {
+            if !p.name.to_lowercase().contains(&q.to_lowercase()) {
+                continue;
+            }
+        }
+
+        if let Some(t) = tag {
+            let target = if t.starts_with('#') {
+                t.to_string()
+            } else {
+                format!("#{}", t)
+            };
+            if !p.tags.contains(&target) {
+                continue;
+            }
+        }
+
         let mut issues = Vec::new();
         let mut is_aligned = true;
 
@@ -202,10 +219,11 @@ pub fn generate_status_report(workspace: &Workspace) -> ToadResult<StatusReport>
         .filter(|p| p.vcs_status == VcsStatus::Clean && p.is_aligned)
         .count();
 
+    let total_count = status_projects.len();
     let summary = format!(
         "{:02}/{} projects are HEALTHY & CLEAN",
         healthy_count,
-        status_projects.len()
+        total_count
     );
 
     let context_type = if workspace.projects_dir.join(".gitmodules").exists() {
