@@ -201,6 +201,8 @@ pub fn scan_single_project(
     let artifact_set: std::collections::HashSet<&str> = artifact_dirs.iter().map(|s| s.as_str()).collect();
     let stats = toad_ops::stats::calculate_project_stats(&path, &artifact_set);
 
+    let dna = crate::detection::detect_dna(&path);
+
     Some(ProjectDetail {
         name,
         path,
@@ -216,6 +218,7 @@ pub fn scan_single_project(
         source,
         total_size: stats.total_bytes,
         bloat_index: stats.bloat_index,
+        dna,
     })
 }
 
@@ -283,11 +286,11 @@ pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>
                                 artifact_dirs: Vec::new(),
                                 sub_projects: Vec::new(),
                                 submodules: Vec::new(),
-                                source: toad_core::TargetSource::Submodule,
-                                total_size: 0, // Stats for submodules could be calculated, but 0 for now
-                                bloat_index: 0.0,
-                            });
-                        }
+                                                        source: toad_core::TargetSource::Submodule,
+                                                        total_size: 0, // Stats for submodules could be calculated, but 0 for now
+                                                        bloat_index: 0.0,
+                                                        dna: crate::detection::detect_dna(&root.join(&sub.path)),
+                                                    });                        }
                         
                         details.push(hub_detail);
                     }

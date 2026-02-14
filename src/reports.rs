@@ -26,10 +26,22 @@ pub fn sync_registry(workspace: &Workspace, reporter: &dyn ProgressReporter) -> 
     reporter.set_message("Saving to registry...");
     let registry = toad_core::ProjectRegistry {
         fingerprint,
-        projects,
+        projects: projects.clone(),
         last_sync: std::time::SystemTime::now(),
     };
     registry.save(workspace.active_context.as_deref(), None)?;
+
+    // Generate and save ATLAS.json
+    reporter.set_message("Updating architectural atlas...");
+    let mut atlas = toad_core::ProjectAtlas::default();
+    for p in &projects {
+        atlas.dna_map.insert(p.name.clone(), p.dna.clone());
+    }
+    let atlas_json = serde_json::to_string_pretty(&atlas)?;
+    if let Some(parent) = workspace.atlas_path().parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(workspace.atlas_path(), atlas_json)?;
 
     let count = registry.projects.len();
     reporter.finish_with_message("SUCCESS: Registry synchronized.");

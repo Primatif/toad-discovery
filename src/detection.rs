@@ -37,8 +37,9 @@ pub fn extract_essence(project_path: &Path) -> Option<String> {
                     if char_count + to_add.len() > limit {
                         let allowed = if limit > char_count { limit - char_count } else { 0 };
                         if allowed > 3 {
-                            to_add.truncate(allowed - 3);
-                            to_add.push_str("...");
+                            let mut truncated: String = to_add.chars().take(allowed - 3).collect();
+                            truncated.push_str("...");
+                            to_add = truncated;
                         } else {
                             break;
                         }
@@ -110,4 +111,52 @@ pub fn discover_sub_projects(path: &Path) -> Vec<String> {
     }
     subs.sort();
     subs
+}
+
+pub fn detect_dna(path: &Path) -> toad_core::ProjectDna {
+    let mut roles = Vec::new();
+    let mut capabilities = Vec::new();
+    let mut patterns = Vec::new();
+
+    // 1. Role Detection (Directory based)
+    if path.join("src/models").exists() || path.join("models").exists() || path.join("src/db").exists() {
+        roles.push("Data Layer".to_string());
+    }
+    if path.join("src/api").exists() || path.join("api").exists() || path.join("src/routes").exists() {
+        roles.push("API Surface".to_string());
+    }
+    if path.join("bin").exists() || path.join("src/bin").exists() || path.join("src/cli.rs").exists() {
+        roles.push("CLI".to_string());
+    }
+    if path.join("tests").exists() || path.join("src/tests").exists() {
+        roles.push("Tests".to_string());
+    }
+
+    // 2. Capability Detection (File/Content based)
+    if path.join("Dockerfile").exists() || path.join("docker-compose.yml").exists() {
+        capabilities.push("Dockerized".to_string());
+    }
+    
+    if let Ok(content) = fs::read_to_string(path.join("Cargo.toml")) {
+        if content.contains("tokio") { capabilities.push("Async/Tokio".to_string()); }
+        if content.contains("serde") { capabilities.push("Serialization".to_string()); }
+        if content.contains("clap") { capabilities.push("CLI/Clap".to_string()); }
+    }
+
+    if let Ok(content) = fs::read_to_string(path.join("package.json")) {
+        if content.contains("\"express\"") { capabilities.push("Express.js".to_string()); }
+        if content.contains("\"react\"") { capabilities.push("React".to_string()); }
+        if content.contains("\"next\"") { capabilities.push("Next.js".to_string()); }
+    }
+
+    // 3. Pattern Detection (Inference)
+    if path.join("conductor").exists() {
+        patterns.push("Conductor-Managed".to_string());
+    }
+
+    toad_core::ProjectDna {
+        roles,
+        capabilities,
+        structural_patterns: patterns,
+    }
 }
