@@ -1,16 +1,19 @@
 use crate::scanner::scan_all_projects;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use toad_core::{
-    ChangelogHistory, ChangeType, ContextType, EcosystemChangelog, ProgressReporter,
-    ProjectChange, ProjectStatus, SearchResult, StatusReport, ToadResult, VcsStatus, Workspace,
+    ChangeType, ChangelogHistory, ContextType, EcosystemChangelog, ProgressReporter, ProjectChange,
+    ProjectDetail, ProjectStatus, SearchResult, StatusReport, ToadResult, VcsStatus, Workspace,
 };
 
 pub fn sync_registry(workspace: &Workspace, reporter: &dyn ProgressReporter) -> ToadResult<usize> {
     reporter.set_message("Discovering projects on disk...");
     let fingerprint = workspace.get_fingerprint()?;
-    
+
     // Load old registry for diffing
-    let old_registry = toad_core::ProjectRegistry::load(workspace.active_context.as_deref(), None).unwrap_or_default();
-    
+    let old_registry = toad_core::ProjectRegistry::load(workspace.active_context.as_deref(), None)
+        .unwrap_or_default();
+
     let projects = scan_all_projects(workspace)?;
 
     reporter.set_message("Generating diff...");
@@ -48,10 +51,12 @@ pub fn sync_registry(workspace: &Workspace, reporter: &dyn ProgressReporter) -> 
     Ok(count)
 }
 
-fn generate_diff(old: &[toad_core::ProjectDetail], new: &[toad_core::ProjectDetail]) -> Vec<ProjectChange> {
+fn generate_diff(old: &[ProjectDetail], new: &[ProjectDetail]) -> Vec<ProjectChange> {
     let mut changes = Vec::new();
-    let old_map: std::collections::HashMap<String, &toad_core::ProjectDetail> = old.iter().map(|p| (p.name.clone(), p)).collect();
-    let new_map: std::collections::HashMap<String, &toad_core::ProjectDetail> = new.iter().map(|p| (p.name.clone(), p)).collect();
+    let old_map: HashMap<String, &ProjectDetail> =
+        old.iter().map(|p| (p.name.clone(), p)).collect();
+    let new_map: HashMap<String, &ProjectDetail> =
+        new.iter().map(|p| (p.name.clone(), p)).collect();
 
     for (name, p_new) in &new_map {
         if let Some(p_old) = old_map.get(name) {
@@ -62,10 +67,26 @@ fn generate_diff(old: &[toad_core::ProjectDetail], new: &[toad_core::ProjectDeta
                 changes.push(ProjectChange {
                     name: name.clone(),
                     change_type: ChangeType::Modified,
-                    old_vcs: if vcs_changed { Some(p_old.vcs_status.clone()) } else { None },
-                    new_vcs: if vcs_changed { Some(p_new.vcs_status.clone()) } else { None },
-                    old_activity: if activity_changed { Some(p_old.activity.clone()) } else { None },
-                    new_activity: if activity_changed { Some(p_new.activity.clone()) } else { None },
+                    old_vcs: if vcs_changed {
+                        Some(p_old.vcs_status.clone())
+                    } else {
+                        None
+                    },
+                    new_vcs: if vcs_changed {
+                        Some(p_new.vcs_status.clone())
+                    } else {
+                        None
+                    },
+                    old_activity: if activity_changed {
+                        Some(p_old.activity.clone())
+                    } else {
+                        None
+                    },
+                    new_activity: if activity_changed {
+                        Some(p_new.activity.clone())
+                    } else {
+                        None
+                    },
                 });
             }
         } else {
@@ -98,10 +119,10 @@ fn generate_diff(old: &[toad_core::ProjectDetail], new: &[toad_core::ProjectDeta
 
 fn save_changelog(workspace: &Workspace, entry: EcosystemChangelog) -> ToadResult<()> {
     let path = workspace.changelog_path();
-    
+
     // Ensure the directory exists
     workspace.ensure_shadows()?;
-    
+
     let mut history = if path.exists() {
         let content = std::fs::read_to_string(&path)?;
         serde_json::from_str::<ChangelogHistory>(&content).unwrap_or_default()
@@ -110,7 +131,7 @@ fn save_changelog(workspace: &Workspace, entry: EcosystemChangelog) -> ToadResul
     };
 
     history.entries.push(entry);
-    
+
     // Limit history to last 50 entries
     if history.entries.len() > 50 {
         history.entries.remove(0);
@@ -149,8 +170,12 @@ pub fn search_projects(
             let query_lower = query.to_lowercase();
             let name_match = p.name.to_lowercase().contains(&query_lower);
             let stack_match = p.stack.to_lowercase().contains(&query_lower);
-            let essence_match = p.essence.as_ref().map(|e| e.to_lowercase().contains(&query_lower)).unwrap_or(false);
-            
+            let essence_match = p
+                .essence
+                .as_ref()
+                .map(|e| e.to_lowercase().contains(&query_lower))
+                .unwrap_or(false);
+
             let tag_match = match tag {
                 Some(t) => {
                     let target = if t.starts_with('#') {
@@ -172,15 +197,19 @@ pub fn search_projects(
     })
 }
 
-pub fn generate_status_report(workspace: &Workspace, query: Option<&str>, tag: Option<&str>) -> ToadResult<StatusReport> {
+pub fn generate_status_report(
+    workspace: &Workspace,
+    query: Option<&str>,
+    tag: Option<&str>,
+) -> ToadResult<StatusReport> {
     let projects = scan_all_projects(workspace)?;
     let mut status_projects = Vec::new();
 
     for p in projects {
-        if let Some(q) = query {
-            if !p.name.to_lowercase().contains(&q.to_lowercase()) {
-                continue;
-            }
+        if let Some(q) = query
+            && !p.name.to_lowercase().contains(&q.to_lowercase())
+        {
+            continue;
         }
 
         if let Some(t) = tag {
@@ -234,8 +263,7 @@ pub fn generate_status_report(workspace: &Workspace, query: Option<&str>, tag: O
     let total_count = status_projects.len();
     let summary = format!(
         "{:02}/{} projects are HEALTHY & CLEAN",
-        healthy_count,
-        total_count
+        healthy_count, total_count
     );
 
     let context_type = if workspace.projects_dir.join(".gitmodules").exists() {
@@ -252,4 +280,44 @@ pub fn generate_status_report(workspace: &Workspace, query: Option<&str>, tag: O
         projects: status_projects,
         summary,
     })
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DNAStats {
+    pub role_distribution: HashMap<String, usize>,
+    pub capability_clusters: HashMap<String, Vec<String>>,
+    pub pattern_adoption: HashMap<String, f32>,
+}
+
+pub fn generate_dna_report(projects: &[ProjectDetail]) -> DNAStats {
+    let mut role_dist = HashMap::new();
+    let mut cap_clusters: HashMap<String, Vec<String>> = HashMap::new();
+    let mut pattern_counts = HashMap::new();
+
+    for p in projects {
+        for role in &p.dna.roles {
+            *role_dist.entry(role.clone()).or_insert(0) += 1;
+        }
+        for cap in &p.dna.capabilities {
+            cap_clusters
+                .entry(cap.clone())
+                .or_default()
+                .push(p.name.clone());
+        }
+        for pattern in &p.dna.structural_patterns {
+            *pattern_counts.entry(pattern.clone()).or_insert(0) += 1;
+        }
+    }
+
+    let total = projects.len() as f32;
+    let pattern_adoption = pattern_counts
+        .into_iter()
+        .map(|(k, v)| (k, (v as f32 / total) * 100.0))
+        .collect();
+
+    DNAStats {
+        role_distribution: role_dist,
+        capability_clusters: cap_clusters,
+        pattern_adoption,
+    }
 }

@@ -46,7 +46,7 @@ fn test_scan_all_projects() -> ToadResult<()> {
     let _lock = ENV_MUTEX.lock().unwrap();
     let dir = tempdir().unwrap();
     let root = fs::canonicalize(dir.path())?;
-    
+
     // Mock config dir to avoid real ~/.toad
     let config_dir = root.join(".toad");
     fs::create_dir_all(&config_dir)?;
@@ -137,7 +137,7 @@ fn test_scan_all_projects_high_volume() -> ToadResult<()> {
     let _lock = ENV_MUTEX.lock().unwrap();
     let dir = tempdir()?;
     let root = fs::canonicalize(dir.path())?;
-    
+
     // Mock config dir
     let config_dir = root.join(".toad");
     fs::create_dir_all(&config_dir)?;

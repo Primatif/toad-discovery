@@ -198,7 +198,8 @@ pub fn scan_single_project(
     all_tags.sort();
 
     // Calculate stats
-    let artifact_set: std::collections::HashSet<&str> = artifact_dirs.iter().map(|s| s.as_str()).collect();
+    let artifact_set: std::collections::HashSet<&str> =
+        artifact_dirs.iter().map(|s| s.as_str()).collect();
     let stats = toad_ops::stats::calculate_project_stats(&path, &artifact_set);
 
     let dna = crate::detection::detect_dna(&path);
@@ -244,54 +245,58 @@ pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>
         } else {
             root
         }
-    } else if root.join(".toad-root").exists() || root.join(".gitmodules").exists() {
-        root
     } else {
         root
     };
 
-    if codebase_root.exists() {
-        if let Some(hub_detail) = scan_single_project(
+    if codebase_root.exists()
+        && let Some(hub_detail) = scan_single_project(
             codebase_root.to_path_buf(),
             &strategy_registry,
             &tag_registry,
             toad_core::TargetSource::HubRoot,
-        ) {
-            // Only add as Hub if it has submodules or is a real project
-            if !hub_detail.submodules.is_empty() || hub_detail.stack != "Generic" {
-                for sub in &hub_detail.submodules {
-                    let sub_abs_path = codebase_root.join(&sub.path);
-                    hub_submodule_paths.insert(sub_abs_path.clone());
+        )
+    {
+        // Only add as Hub if it has submodules or is a real project
+        if !hub_detail.submodules.is_empty() || hub_detail.stack != "Generic" {
+            for sub in &hub_detail.submodules {
+                let sub_abs_path = codebase_root.join(&sub.path);
+                hub_submodule_paths.insert(sub_abs_path.clone());
 
-                    details.push(ProjectDetail {
-                        name: sub.name.clone(),
-                        path: sub_abs_path.clone(),
-                        stack: sub.stack.clone(),
-                        activity: detect_activity(&sub_abs_path),
-                        vcs_status: sub.vcs_status.clone(),
-                        essence: sub.essence.clone(),
-                        tags: {
-                            let mut t = sub.taxonomy.clone();
-                            let p_tags = tag_registry.get_tags(&sub.name);
-                            for pt in p_tags {
-                                let with_hash = if pt.starts_with('#') { pt } else { format!("#{}", pt) };
-                                if !t.contains(&with_hash) { t.push(with_hash); }
+                details.push(ProjectDetail {
+                    name: sub.name.clone(),
+                    path: sub_abs_path.clone(),
+                    stack: sub.stack.clone(),
+                    activity: detect_activity(&sub_abs_path),
+                    vcs_status: sub.vcs_status.clone(),
+                    essence: sub.essence.clone(),
+                    tags: {
+                        let mut t = sub.taxonomy.clone();
+                        let p_tags = tag_registry.get_tags(&sub.name);
+                        for pt in p_tags {
+                            let with_hash = if pt.starts_with('#') {
+                                pt
+                            } else {
+                                format!("#{}", pt)
+                            };
+                            if !t.contains(&with_hash) {
+                                t.push(with_hash);
                             }
-                            t.sort();
-                            t
-                        },
-                        taxonomy: sub.taxonomy.clone(),
-                        artifact_dirs: Vec::new(),
-                        sub_projects: Vec::new(),
-                        submodules: Vec::new(),
-                        source: toad_core::TargetSource::Submodule,
-                        total_size: 0,
-                        bloat_index: 0.0,
-                        dna: crate::detection::detect_dna(&sub_abs_path),
-                    });
-                }
-                details.push(hub_detail);
+                        }
+                        t.sort();
+                        t
+                    },
+                    taxonomy: sub.taxonomy.clone(),
+                    artifact_dirs: Vec::new(),
+                    sub_projects: Vec::new(),
+                    submodules: Vec::new(),
+                    source: toad_core::TargetSource::Submodule,
+                    total_size: 0,
+                    bloat_index: 0.0,
+                    dna: crate::detection::detect_dna(&sub_abs_path),
+                });
             }
+            details.push(hub_detail);
         }
     }
 
@@ -304,7 +309,7 @@ pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>
             .filter_map(|entry_res| {
                 let entry = entry_res.ok()?;
                 let path = entry.path();
-                
+
                 if path == codebase_root {
                     return None;
                 }
@@ -312,7 +317,7 @@ pub fn scan_all_projects(workspace: &Workspace) -> ToadResult<Vec<ProjectDetail>
                 if hub_submodule_paths.contains(&path) {
                     return None;
                 }
-                
+
                 scan_single_project(
                     path,
                     &strategy_registry,

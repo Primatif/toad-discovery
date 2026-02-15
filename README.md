@@ -13,8 +13,8 @@ powers every other Toad feature.
   markers (Cargo.toml, package.json, go.mod, etc.) using the `StackStrategy`
   system defined in `toad-core`.
 - **Metadata Extraction** — For each project: stack detection, activity tier
-  classification, VCS status analysis, tag discovery, sub-project detection,
-  and semantic essence extraction from READMEs.
+  classification, VCS status analysis, tag discovery, sub-project detection, and
+  semantic essence extraction from READMEs.
 - **Registry Sync** — `sync_registry()` orchestrates a full ecosystem scan,
   generates the `EcosystemChangelog`, and persists the `ProjectRegistry` to
   `~/.toad/shadows/`.
