@@ -85,6 +85,78 @@ pub fn get_project_metadata(
     (stack, taxonomy, artifact_dirs, essence)
 }
 
+/// Detect malformed metadata files and return diagnostics
+pub fn detect_metadata_issues(
+    path: &Path,
+    project_name: &str,
+) -> toad_core::DiagnosticReport {
+    let mut report = toad_core::DiagnosticReport::new();
+
+    // Check Cargo.toml for Rust projects
+    let cargo_toml = path.join("Cargo.toml");
+    if cargo_toml.exists() {
+        match fs::read_to_string(&cargo_toml) {
+            Ok(content) => {
+                if let Err(e) = toml::from_str::<toml::Value>(&content) {
+                    report.add(
+                        toad_core::ParseDiagnostic::error(
+                            project_name.to_string(),
+                            path.to_path_buf(),
+                            "Cargo.toml".to_string(),
+                            "Failed to parse Cargo.toml".to_string(),
+                        )
+                        .with_details(e.to_string()),
+                    );
+                }
+            }
+            Err(e) => {
+                report.add(
+                    toad_core::ParseDiagnostic::warning(
+                        project_name.to_string(),
+                        path.to_path_buf(),
+                        "Cargo.toml".to_string(),
+                        "Failed to read Cargo.toml".to_string(),
+                    )
+                    .with_details(e.to_string()),
+                );
+            }
+        }
+    }
+
+    // Check package.json for Node projects
+    let package_json = path.join("package.json");
+    if package_json.exists() {
+        match fs::read_to_string(&package_json) {
+            Ok(content) => {
+                if let Err(e) = serde_json::from_str::<serde_json::Value>(&content) {
+                    report.add(
+                        toad_core::ParseDiagnostic::error(
+                            project_name.to_string(),
+                            path.to_path_buf(),
+                            "package.json".to_string(),
+                            "Failed to parse package.json".to_string(),
+                        )
+                        .with_details(e.to_string()),
+                    );
+                }
+            }
+            Err(e) => {
+                report.add(
+                    toad_core::ParseDiagnostic::warning(
+                        project_name.to_string(),
+                        path.to_path_buf(),
+                        "package.json".to_string(),
+                        "Failed to read package.json".to_string(),
+                    )
+                    .with_details(e.to_string()),
+                );
+            }
+        }
+    }
+
+    report
+}
+
 pub fn scan_single_project(
     path: PathBuf,
     strategy_registry: &StrategyRegistry,
