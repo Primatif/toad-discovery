@@ -13,7 +13,7 @@ serde_json = "1.0.149"
 toad-core = { version = "1.1.2", path = "../toad-core" }
 toad-git = { version = "1.1.2", path = "../toad-git" }
 toad-ops = { version = "1.1.2", path = "../toad-ops" }
-toml = "0.8"
+toml = "1.0.3"
 
 [dev-dependencies]
 filetime = "0.2"
