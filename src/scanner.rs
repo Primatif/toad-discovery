@@ -86,10 +86,7 @@ pub fn get_project_metadata(
 }
 
 /// Detect malformed metadata files and return diagnostics
-pub fn detect_metadata_issues(
-    path: &Path,
-    project_name: &str,
-) -> toad_core::DiagnosticReport {
+pub fn detect_metadata_issues(path: &Path, project_name: &str) -> toad_core::DiagnosticReport {
     let mut report = toad_core::DiagnosticReport::new();
 
     // Check Cargo.toml for Rust projects
