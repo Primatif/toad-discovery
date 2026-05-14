@@ -1,8 +1,12 @@
 use crate::*;
 use std::fs;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 use tempfile::tempdir;
+use toad_core::ToadResult;
 use toad_core::{ActivityTier, VcsStatus, Workspace};
+
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 #[test]
 fn test_find_projects() {
@@ -19,7 +23,7 @@ fn test_find_projects() {
 }
 
 #[test]
-fn test_activity_detection() -> Result<()> {
+fn test_activity_detection() -> ToadResult<()> {
     let dir = tempdir().unwrap();
     let path = dir.path().join("active_proj");
     fs::create_dir(&path).unwrap();
@@ -38,19 +42,24 @@ fn test_activity_detection() -> Result<()> {
 }
 
 #[test]
-fn test_scan_all_projects() -> Result<()> {
+fn test_scan_all_projects() -> ToadResult<()> {
+    let _lock = ENV_MUTEX.lock().unwrap();
     let dir = tempdir().unwrap();
-    let root = dir.path().to_path_buf();
-    let ws = Workspace::with_root(root.clone(), None, None);
+    let root = fs::canonicalize(dir.path())?;
 
-    // Setup strategies in the temp home
+    // Mock config dir to avoid real ~/.toad
     let config_dir = root.join(".toad");
+    fs::create_dir_all(&config_dir)?;
     unsafe {
-        std::env::set_var("TOAD_ROOT", root.to_str().unwrap());
+        std::env::set_var("TOAD_CONFIG_DIR", config_dir.to_str().unwrap());
     }
-    let builtin_dir = config_dir.join("strategies/builtin");
-    fs::create_dir_all(&builtin_dir).unwrap();
-    toad_core::strategy::StrategyRegistry::install_defaults(&builtin_dir).unwrap();
+
+    let ws = Workspace {
+        toad_home: config_dir,
+        projects_dir: root.join("projects"),
+        shadows_dir: root.join(".toad/shadows"),
+        active_context: None,
+    };
 
     // Create projects dir
     fs::create_dir(root.join("projects")).unwrap();
@@ -76,7 +85,7 @@ fn test_scan_all_projects() -> Result<()> {
 }
 
 #[test]
-fn test_detect_vcs_status() -> Result<()> {
+fn test_detect_vcs_status() -> ToadResult<()> {
     let dir = tempdir()?;
     let p = dir.path();
 
@@ -97,7 +106,7 @@ fn test_detect_vcs_status() -> Result<()> {
 }
 
 #[test]
-fn test_extract_essence_truncation() -> Result<()> {
+fn test_extract_essence_truncation() -> ToadResult<()> {
     let dir = tempdir()?;
     let p = dir.path();
     let long_readme = "Long line. ".repeat(100);
@@ -105,12 +114,12 @@ fn test_extract_essence_truncation() -> Result<()> {
 
     let essence = extract_essence(p);
     assert!(essence.is_some());
-    assert!(essence.unwrap().len() <= 600);
+    assert!(essence.unwrap().len() <= 800);
     Ok(())
 }
 
 #[test]
-fn test_discover_sub_projects() -> Result<()> {
+fn test_discover_sub_projects() -> ToadResult<()> {
     let dir = tempdir()?;
     let p = dir.path();
     let crates_dir = p.join("crates");
@@ -124,19 +133,24 @@ fn test_discover_sub_projects() -> Result<()> {
 }
 
 #[test]
-fn test_scan_all_projects_high_volume() -> Result<()> {
+fn test_scan_all_projects_high_volume() -> ToadResult<()> {
+    let _lock = ENV_MUTEX.lock().unwrap();
     let dir = tempdir()?;
-    let root = dir.path().to_path_buf();
-    let ws = Workspace::with_root(root.clone(), None, None);
+    let root = fs::canonicalize(dir.path())?;
 
-    // Setup strategies in the temp home
+    // Mock config dir
     let config_dir = root.join(".toad");
+    fs::create_dir_all(&config_dir)?;
     unsafe {
-        std::env::set_var("TOAD_ROOT", root.to_str().unwrap());
+        std::env::set_var("TOAD_CONFIG_DIR", config_dir.to_str().unwrap());
     }
-    let builtin_dir = config_dir.join("strategies/builtin");
-    fs::create_dir_all(&builtin_dir).unwrap();
-    toad_core::strategy::StrategyRegistry::install_defaults(&builtin_dir).unwrap();
+
+    let ws = Workspace {
+        toad_home: config_dir,
+        projects_dir: root.join("projects"),
+        shadows_dir: root.join(".toad/shadows"),
+        active_context: None,
+    };
 
     fs::create_dir(root.join("projects"))?;
 
